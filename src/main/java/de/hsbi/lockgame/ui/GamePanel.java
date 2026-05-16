@@ -1,6 +1,7 @@
 package de.hsbi.lockgame.ui;
 
 import de.hsbi.lockgame.logic.GameEngine;
+import de.hsbi.lockgame.logic.GameObserver;
 import de.hsbi.lockgame.logic.GameState;
 import de.hsbi.lockgame.model.Direction;
 import de.hsbi.lockgame.settings.GameConstants;
@@ -8,64 +9,72 @@ import de.hsbi.lockgame.settings.InputConstants;
 import de.hsbi.lockgame.ui.render.GameRenderer;
 import java.awt.*;
 import java.awt.event.ActionEvent;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Objects;
 import javax.swing.*;
 
-public class GamePanel extends JPanel {
-  private GameState state;
-  private final GameRenderer renderer;
-  private GameEngine gameEngine;
+public class GamePanel extends JPanel implements GameObserver<GameState> {
+    private GameState state;
+    private final GameRenderer renderer;
+    private final List<GameObserver<Direction>> directionObservers = new ArrayList<>();
 
-  public GamePanel(GameState initialState, GameRenderer renderer) {
-    this.state = initialState;
-    this.renderer = renderer;
+    public GamePanel(GameState initialState, GameRenderer renderer) {
+        this.state = initialState;
+        this.renderer = renderer;
 
-    var width = initialState.level().width() * GameConstants.TILE_SIZE;
-    var height = initialState.level().height() * GameConstants.TILE_SIZE;
+        var width = initialState.level().width() * GameConstants.TILE_SIZE;
+        var height = initialState.level().height() * GameConstants.TILE_SIZE;
 
-    setPreferredSize(new Dimension(width, height));
-    setBackground(Color.BLACK);
+        setPreferredSize(new Dimension(width, height));
+        setBackground(Color.BLACK);
 
-    setFocusable(true);
-    InputConstants.BINDINGS.forEach(this::setupKeyBindings);
-  }
+        setFocusable(true);
+        InputConstants.BINDINGS.forEach(this::setupKeyBindings);
+    }
 
-  public void update(GameState newState) {
-    this.state = newState;
-    repaint();
-  }
+    @Override
+    public void update(GameState newState) {
+        this.state = newState;
+        repaint();
+    }
 
-  public void setGameEngine(GameEngine engine) {
-    this.gameEngine = engine;
-  }
+    public void setGameEngine(GameEngine engine) {
+        addObserver(engine);
+    }
 
-  private void setupKeyBindings(Direction direction, Iterable<Integer> keyCodes) {
-    // Swing separates two layers: multiple keystrokes can be mapped to a single Action
-    // 1. KeyStroke → Name
-    var inputMap = getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
-    // 2. Name → Action
-    var actionMap = getActionMap();
+    public void addObserver(GameObserver<Direction> observer) {
+        directionObservers.add(Objects.requireNonNull(observer));
+    }
 
-    // shared name per direction
-    var actionKey = "move_" + direction.name();
+    public void removeObserver(GameObserver<Direction> observer) {
+        directionObservers.remove(observer);
+    }
 
-    // shared Swing Action per direction
-    var swingAction =
-        new AbstractAction() {
-          @Override
-          public void actionPerformed(ActionEvent e) {
-            gameEngine.update(direction);
-          }
-        };
+    private void setupKeyBindings(Direction direction, Iterable<Integer> keyCodes) {
+        var inputMap = getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
+        var actionMap = getActionMap();
+        var actionKey = "move_" + direction.name();
 
-    // 1. register KeyStroke → Name
-    keyCodes.forEach(keyCode -> inputMap.put(KeyStroke.getKeyStroke(keyCode, 0), actionKey));
-    // 2. register Name → Action
-    actionMap.put(actionKey, swingAction);
-  }
+        var swingAction =
+                new AbstractAction() {
+                    @Override
+                    public void actionPerformed(ActionEvent e) {
+                        notifyDirectionObservers(direction);
+                    }
+                };
 
-  @Override
-  protected void paintComponent(Graphics g) {
-    super.paintComponent(g);
-    renderer.render((Graphics2D) g, state, GameConstants.TILE_SIZE);
-  }
+        keyCodes.forEach(keyCode -> inputMap.put(KeyStroke.getKeyStroke(keyCode, 0), actionKey));
+        actionMap.put(actionKey, swingAction);
+    }
+
+    private void notifyDirectionObservers(Direction direction) {
+        directionObservers.forEach(observer -> observer.update(direction));
+    }
+
+    @Override
+    protected void paintComponent(Graphics g) {
+        super.paintComponent(g);
+        renderer.render((Graphics2D) g, state, GameConstants.TILE_SIZE);
+    }
 }
